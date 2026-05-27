@@ -1,7 +1,7 @@
 # Crypto Stat-Arb Trading System
 
 **End-to-end statistical arbitrage pipeline for crypto pairs trading.**  
-Implements cointegration-based pairs trading across 9 assets (BTC, ETH, SOL, ADA, XRP, DOGE, DOT, AVAX, LINK) with walk-forward Kelly sizing, strict train/test separation, and a vectorized backtest engine with transaction costs.
+Implements cointegration-based pairs trading across 17 assets (BTC, ETH, SOL, ADA, XRP, DOGE, DOT, AVAX, LINK, LTC, BCH, MATIC, ATOM, NEAR, UNI, AAVE, FIL) with walk-forward Kelly sizing, strict train/test separation, and a vectorized backtest engine with transaction costs.
 
 ---
 
@@ -47,7 +47,7 @@ Pair selection is performed **exclusively on training data** to prevent look-ahe
 | Window | Period | Bars |
 |--------|--------|------|
 | Train (screening) | 2023-01-01 → 2024-12-31 | 731 daily bars |
-| Test (backtest) | 2025-01-01 → present | 476 daily bars |
+| Test (backtest) | 2025-01-01 → present | 511 daily bars |
 
 Hedge ratios and OU half-lives are estimated on training data only. Signal thresholds (`entry_z`, `exit_z`, `stop_z`, `lookback`) are fixed a priori and never tuned on any data.
 
@@ -71,20 +71,31 @@ This eliminates in-sample weight optimisation bias.
 
 ## Backtest Results (daily bars, $100k capital, walk-forward Kelly)
 
-> 2 cointegrated pairs identified on 2-year training data (EG + ADF + OU half-life).  
-> Results below are **out-of-sample** (2025–present, ~15 months), walk-forward sized.  
+> 11 cointegrated pairs identified out of 136 candidates on 2-year training data (EG + ADF + OU half-life). 5 also pass the Johansen trace test.  
+> Results below are **out-of-sample** (2025-01-01 → 2026-05-26, ~17 months), walk-forward sized.  
 > Alpha t-stat: intercept t-stat from `r_strategy = α + β·r_BTC + ε`.
 
 | Pair | Ann. Return | Sharpe | Max DD | Calmar | Trades | Win Rate | Alpha t-stat | β/BTC |
 |------|-------------|--------|--------|--------|--------|----------|--------------|-------|
-| **DOT/LINK** | **3.8%** | **1.42** | **-1.5%** | **2.59** | 5 | 40% | 1.66* | 0.009 |
-| ETH/SOL | 0.7% | 0.14 | -4.5% | 0.15 | 3 | 33% | 0.25 | 0.053 |
+| **ADA/AAVE** | **4.9%** | **1.85** | **-1.0%** | **4.86** | 3 | 67% | **2.20**\*\* | 0.004 |
+| **DOT/LINK** | **3.6%** | **1.37** | **-1.5%** | **2.41** | 5 | 40% | 1.66\* | 0.009 |
+| DOT/AAVE | 2.8% | 1.35 | -1.1% | 2.52 | 2 | 50% | 1.62 | 0.005 |
+| DOT/BCH | 2.8% | 1.32 | -1.0% | 2.90 | 2 | 50% | 1.58 | 0.006 |
+| UNI/FIL | 8.6% | 0.81 | -4.2% | 2.04 | 5 | 80% | 1.02 | 0.059 |
+| ETH/NEAR | 2.1% | 0.51 | -3.5% | 0.60 | 4 | 25% | 0.74 | 0.040 |
+| MATIC/ATOM | 2.1% | 0.28 | -11.8% | 0.18 | 2 | 50% | 0.36 | 0.027 |
+| ETH/SOL | 0.6% | 0.13 | -4.5% | 0.14 | 3 | 33% | 0.26 | 0.052 |
+| UNI/AAVE | 0.0% | 0.00 | 0.0% | — | 1 | 0% | — | 0.000 |
+| DOT/FIL | -0.4% | -0.40 | -1.2% | -0.33 | 6 | 0% | -0.48 | -0.001 |
+| LTC/UNI | -5.0% | -0.98 | -9.5% | -0.53 | 3 | 0% | -1.25 | 0.055 |
 
-> \* p < 0.10
+> \* p < 0.10  \*\* p < 0.05
 
-**DOT/LINK** is the standout: Sharpe 1.42 with a maximum drawdown of just -1.5% and a near-zero BTC beta (β = 0.009), confirming the strategy is genuinely market-neutral. The alpha t-stat of 1.66 (p = 0.097) is borderline significant — positive intercept not explained by BTC exposure.
+**ADA/AAVE** is the new standout: Sharpe 1.85 with -1.0% max drawdown and an alpha t-stat of 2.20 (p = 0.028) — significant at 5% and not explained by BTC exposure (β = 0.004). Caveat: training-period performance was negative (Sharpe -0.89), so this only "worked" out-of-sample. Could be a regime shift in DeFi-vs-L1 dynamics in 2025; could be noise — wait for more out-of-sample bars before sizing aggressively.
 
-Note: both pairs show negative in-sample Sharpe on training data and positive out-of-sample. This is the expected pattern for a stat-arb with no in-sample parameter tuning — it rules out look-ahead bias as the source of performance.
+**DOT/LINK** continues to hold up (Sharpe 1.37, alpha t-stat 1.66). Three of the top four pairs use DOT as the long leg, so their bets are highly correlated — don't naively stack capital across them.
+
+Note: most pairs show negative in-sample Sharpe on training data and positive out-of-sample, which is the expected pattern for a stat-arb with no in-sample parameter tuning — it rules out look-ahead bias as the source of performance.
 
 ---
 
@@ -173,8 +184,9 @@ Capped at 20% of capital per pair. Dollar-neutral: leg sizes scaled by OLS hedge
 
 ## Limitations & Next Steps
 
-- **Trade count**: only 5 and 3 trades respectively in the 15-month test window — Sharpe estimates have wide confidence intervals at this sample size
-- **2-pair universe**: Johansen test fails all 36 pairs on 2-year daily crypto data; relaxing to EG-only yields two pairs. A longer history or higher-frequency data (where available) could unlock more pairs
+- **Trade count**: 2–6 trades per pair in the 17-month test window — Sharpe estimates have wide confidence intervals at this sample size
+- **Correlated pair bets**: three of the top four pairs use DOT as the long leg (DOT/LINK, DOT/AAVE, DOT/BCH). Their PnL streams are not independent; portfolio-level Kelly should account for this rather than treating each pair as a separate bet
+- **ADA/AAVE regime risk**: best out-of-sample pair was negative in-sample — could be a genuine regime shift or could fail forward as quickly as it appeared
 - **Transaction costs are estimated**: real costs vary with order size, venue, and market conditions
 - **Regime changes**: cointegration relationships break during market stress; could add regime detection (e.g. HMM) to suspend trading when structural breaks are detected
 - **Symmetric Kelly short sizing**: when spread drift is negative, the current implementation clips Kelly to zero on the short side; `|μ|` regardless of sign would give symmetric short exposure

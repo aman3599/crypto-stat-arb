@@ -28,6 +28,14 @@ TICKER_MAP = {
     "DOT":  "DOT-USD",
     "AVAX": "AVAX-USD",
     "LINK": "LINK-USD",
+    "LTC":  "LTC-USD",
+    "BCH":  "BCH-USD",
+    "MATIC": "MATIC-USD",
+    "ATOM": "ATOM-USD",
+    "NEAR": "NEAR-USD",
+    "UNI":  "UNI-USD",
+    "AAVE": "AAVE-USD",
+    "FIL":  "FIL-USD",
 }
 
 # Kept as int constants so downstream code that references them still works.

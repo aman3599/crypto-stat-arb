@@ -34,7 +34,8 @@ from signals import generate_signals, SignalConfig, get_current_signal
 from sizing import kelly_size, SizingConfig
 from backtest import run_backtest, run_backtest_walkforward, print_results, BacktestConfig
 
-TICKERS = ["BTC", "ETH", "SOL", "ADA", "XRP", "DOGE", "DOT", "AVAX", "LINK"]
+TICKERS = ["BTC", "ETH", "SOL", "ADA", "XRP", "DOGE", "DOT", "AVAX", "LINK",
+           "LTC", "BCH", "MATIC", "ATOM", "NEAR", "UNI", "AAVE", "FIL"]
 BAR_INTERVAL = INTERVAL_1D
 BAR_HOURS = 24.0   # daily bars
 
