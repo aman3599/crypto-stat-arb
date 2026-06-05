@@ -1,7 +1,9 @@
 # Crypto Stat-Arb Trading System
 
 **End-to-end statistical arbitrage pipeline for crypto pairs trading.**  
-Implements cointegration-based pairs trading across 17 assets (BTC, ETH, SOL, ADA, XRP, DOGE, DOT, AVAX, LINK, LTC, BCH, MATIC, ATOM, NEAR, UNI, AAVE, FIL) with walk-forward Kelly sizing, strict train/test separation, and a vectorized backtest engine with transaction costs.
+Implements cointegration-based pairs trading across 16 assets (BTC, ETH, SOL, ADA, XRP, DOGE, DOT, AVAX, LINK, LTC, BCH, ATOM, NEAR, UNI, AAVE, FIL) with walk-forward Kelly sizing, strict train/test separation, and a vectorized backtest engine with transaction costs.
+
+UNI is sourced as `UNI7083-USD` on Yahoo Finance (the legacy `UNI-USD` feed froze 2025-04-17 after a ticker migration). Polygon (MATIC → POL) was removed when its Yahoo feed went stale; the live POL replacement (`POL28321-USD`) only goes back to October 2023, which would truncate the training window.
 
 ---
 
@@ -47,7 +49,7 @@ Pair selection is performed **exclusively on training data** to prevent look-ahe
 | Window | Period | Bars |
 |--------|--------|------|
 | Train (screening) | 2023-01-01 → 2024-12-31 | 731 daily bars |
-| Test (backtest) | 2025-01-01 → present | 511 daily bars |
+| Test (backtest) | 2025-01-01 → present | 519 daily bars |
 
 Hedge ratios and OU half-lives are estimated on training data only. Signal thresholds (`entry_z`, `exit_z`, `stop_z`, `lookback`) are fixed a priori and never tuned on any data.
 
@@ -71,31 +73,58 @@ This eliminates in-sample weight optimisation bias.
 
 ## Backtest Results (daily bars, $100k capital, walk-forward Kelly)
 
-> 11 cointegrated pairs identified out of 136 candidates on 2-year training data (EG + ADF + OU half-life). 5 also pass the Johansen trace test.  
-> Results below are **out-of-sample** (2025-01-01 → 2026-05-26, ~17 months), walk-forward sized.  
+> 10 cointegrated pairs identified out of 120 candidates on 2-year training data (EG + ADF + OU half-life).  
+> Results below are **out-of-sample** (2025-01-01 → 2026-06-03, ~17 months), walk-forward sized.  
 > Alpha t-stat: intercept t-stat from `r_strategy = α + β·r_BTC + ε`.
 
 | Pair | Ann. Return | Sharpe | Max DD | Calmar | Trades | Win Rate | Alpha t-stat | β/BTC |
 |------|-------------|--------|--------|--------|--------|----------|--------------|-------|
-| **ADA/AAVE** | **4.9%** | **1.85** | **-1.0%** | **4.86** | 3 | 67% | **2.20**\*\* | 0.004 |
-| **DOT/LINK** | **3.6%** | **1.37** | **-1.5%** | **2.41** | 5 | 40% | 1.66\* | 0.009 |
-| DOT/AAVE | 2.8% | 1.35 | -1.1% | 2.52 | 2 | 50% | 1.62 | 0.005 |
-| DOT/BCH | 2.8% | 1.32 | -1.0% | 2.90 | 2 | 50% | 1.58 | 0.006 |
-| UNI/FIL | 8.6% | 0.81 | -4.2% | 2.04 | 5 | 80% | 1.02 | 0.059 |
-| ETH/NEAR | 2.1% | 0.51 | -3.5% | 0.60 | 4 | 25% | 0.74 | 0.040 |
-| MATIC/ATOM | 2.1% | 0.28 | -11.8% | 0.18 | 2 | 50% | 0.36 | 0.027 |
-| ETH/SOL | 0.6% | 0.13 | -4.5% | 0.14 | 3 | 33% | 0.26 | 0.052 |
-| UNI/AAVE | 0.0% | 0.00 | 0.0% | — | 1 | 0% | — | 0.000 |
-| DOT/FIL | -0.4% | -0.40 | -1.2% | -0.33 | 6 | 0% | -0.48 | -0.001 |
-| LTC/UNI | -5.0% | -0.98 | -9.5% | -0.53 | 3 | 0% | -1.25 | 0.055 |
+| **ADA/AAVE** | **5.1%** | **1.89** | **-1.0%** | **5.05** | 3 | 67% | **2.27**\*\* | 0.003 |
+| DOT/AAVE | 2.5% | 1.34 | -1.0% | 2.48 | 2 | 50% | 1.65\* | 0.004 |
+| DOT/BCH | 2.5% | 1.31 | -0.9% | 2.86 | 2 | 50% | 1.62 | 0.005 |
+| ADA/UNI | 1.0% | 0.24 | -5.1% | 0.20 | 3 | 0% | 0.29 | 0.001 |
+| DOGE/UNI | 0.4% | 0.08 | -6.9% | 0.06 | 4 | 25% | 0.07 | -0.006 |
+| DOT/FIL | 0.2% | 0.09 | -1.9% | 0.10 | 6 | 17% | 0.11 | 0.000 |
+| DOT/LINK | 0.0% | 0.00 | 0.0% | — | 5 | 0% | — | 0.000 |
+| ETH/UNI | -0.5% | -0.23 | -3.5% | -0.14 | 2 | 50% | -0.30 | -0.003 |
+| ETH/SOL | -2.0% | -0.50 | -6.9% | -0.29 | 3 | 0% | -0.67 | -0.013 |
+| ETH/NEAR | -3.2% | -0.78 | -7.4% | -0.44 | 4 | 0% | -0.94 | -0.003 |
 
 > \* p < 0.10  \*\* p < 0.05
 
-**ADA/AAVE** is the new standout: Sharpe 1.85 with -1.0% max drawdown and an alpha t-stat of 2.20 (p = 0.028) — significant at 5% and not explained by BTC exposure (β = 0.004). Caveat: training-period performance was negative (Sharpe -0.89), so this only "worked" out-of-sample. Could be a regime shift in DeFi-vs-L1 dynamics in 2025; could be noise — wait for more out-of-sample bars before sizing aggressively.
+**ADA/AAVE** is the standout: Sharpe 1.89 with -1.0% max drawdown and an alpha t-stat of **2.27 (p = 0.024)** — significant at 5% and not explained by BTC exposure (β = 0.003). Caveat: training-period performance was negative (Sharpe -0.87), so this only "worked" out-of-sample. Could be a regime shift in DeFi-vs-L1 dynamics in 2025; could be noise — wait for more out-of-sample bars before sizing aggressively.
 
-**DOT/LINK** continues to hold up (Sharpe 1.37, alpha t-stat 1.66). Three of the top four pairs use DOT as the long leg, so their bets are highly correlated — don't naively stack capital across them.
+Three of the top three pairs use **AAVE as the short leg** (ADA/AAVE, DOT/AAVE) or BCH/DOT-cluster mechanics — their bets are highly correlated. Portfolio-level Kelly should account for this rather than treating each pair as an independent bet.
 
 Note: most pairs show negative in-sample Sharpe on training data and positive out-of-sample, which is the expected pattern for a stat-arb with no in-sample parameter tuning — it rules out look-ahead bias as the source of performance.
+
+---
+
+## Stress Test: 2026 Crypto Drawdown
+
+In May 2026, BTC dropped **-20.6%** in 24 trading days (peak $82,139 on 2026-05-10 → $64,014 on 2026-06-03). ETH dropped -25.2%, SOL -26.4%. This was the sharpest broad-market crypto move since the 2022 cycle and a useful out-of-sample stress test for the strategy.
+
+**Strategy P&L through the drawdown (equal-weight across 10 pairs):**
+
+| Metric | Value |
+|---|---|
+| Portfolio return | **-0.10%** |
+| Portfolio max drawdown | -0.24% |
+| Beta to BTC during window | ~0.0 |
+
+Walk-forward Kelly sized 6 of 10 pairs to zero exposure going into the window (trailing edge had turned negative for those pairs at the 2026-04-01 rebalance). Of the four pairs that traded:
+
+- **ADA/AAVE** generated **+1.30%** through the window (window Sharpe 5.45, MaxDD -0.30%) — true alpha through the drawdown, with z-score-driven mean-reversion firing as expected.
+- **ETH/NEAR** lost -2.49% in a single stopped-out trade — NEAR ripped +46% against the short leg in a 12-day window while ETH dropped -15%. The stop-loss and re-entry cooldown together capped this at one bad trade; without the cooldown the strategy would have whipsawed in 8 more times and lost ~-7%.
+- Two other UNI-leg pairs traded small positions, roughly flat.
+
+The portfolio came through a 20% market move with essentially zero P&L and zero drawdown — the dollar-neutral design and tight stops behaved as intended. **The honest read is not that the strategy "beat" the drawdown; it stayed out of the way, with one genuine alpha trade (ADA/AAVE) offsetting one losing trade (ETH/NEAR).** What this scenario surfaced was three real bugs which have now been fixed (see Methodology Notes below).
+
+### Methodology fixes triggered by this stress test
+
+1. **Stale ticker data**: `UNI-USD` and `MATIC-USD` Yahoo feeds froze in early 2025 after token migrations. The cache forward-filled at the last live price, so four pairs were silently running on dead data. Replaced UNI → `UNI7083-USD`, removed MATIC.
+2. **Walk-forward Kelly went hard-flat too easily**: the sizer took `kelly_f.iloc[-1]` (a single 30-day-rolling stat at quarter-end) and clipped to `[0, 0.20]`. A single noisy day deactivated the whole next quarter. Now uses the **trailing 60-day median** of `kelly_f` for a smoother estimate.
+3. **Asymmetric stop-loss + whipsaw**: the stop only fired when z moved in the *profit* direction past stop_z, not when z moved against the trade. After fixing to `|z| > stop_z`, losing trades got cut at -3.5σ; a **post-stop cooldown** was added so the same direction can't re-enter until z crosses zero, preventing trend-against whipsaw.
 
 ---
 

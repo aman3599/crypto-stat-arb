@@ -30,10 +30,9 @@ TICKER_MAP = {
     "LINK": "LINK-USD",
     "LTC":  "LTC-USD",
     "BCH":  "BCH-USD",
-    "MATIC": "MATIC-USD",
     "ATOM": "ATOM-USD",
     "NEAR": "NEAR-USD",
-    "UNI":  "UNI-USD",
+    "UNI":  "UNI7083-USD",   # UNI-USD froze 2025-04-17; Uniswap's live Yahoo symbol is UNI7083
     "AAVE": "AAVE-USD",
     "FIL":  "FIL-USD",
 }

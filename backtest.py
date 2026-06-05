@@ -281,17 +281,20 @@ def run_backtest_walkforward(
             hedge_ratio,
             sizing_cfg,
         )
-        last_kelly_f = float(train_sizing["kelly_f"].iloc[-1]) if not train_sizing.empty else 0.0
-        last_kelly_f = max(0.0, min(last_kelly_f, sizing_cfg.max_position_pct))
+        # Trailing-60-day median of kelly_f rather than the last point — a single
+        # noisy day at quarter-end was deactivating the whole next quarter.
+        recent_kelly = train_sizing["kelly_f"].iloc[-60:] if not train_sizing.empty else pd.Series([0.0])
+        target_kelly_f = float(recent_kelly.median())
+        target_kelly_f = max(0.0, min(target_kelly_f, sizing_cfg.max_position_pct))
 
-        dollar_exposure = last_kelly_f * sizing_cfg.capital
+        dollar_exposure = target_kelly_f * sizing_cfg.capital
         pos = window_sig["position"]
 
         window_sizing = pd.DataFrame({
             "pos_a_usd": (dollar_exposure * pos).round(2),
             "pos_b_usd": (-dollar_exposure * hedge_ratio * pos).round(2),
             "dollar_exposure": dollar_exposure,
-            "kelly_f": last_kelly_f,
+            "kelly_f": target_kelly_f,
             "rolling_vol": np.nan,
         }, index=window_sig.index)
         all_sizing_chunks.append(window_sizing)

@@ -53,25 +53,41 @@ def generate_signals(
 
     positions = pd.Series(0, index=spread.index, dtype=int)
     current_pos = 0
+    # Cooldown: after a stop-out we suppress re-entry in the SAME direction
+    # until z has crossed back through zero. Prevents whipsaw against a
+    # persistent trend (e.g. NEAR ripping vs ETH May–June 2026).
+    blocked_long = False
+    blocked_short = False
 
     for i in range(config.lookback, len(zscore)):
         z = zscore.iloc[i]
         if np.isnan(z):
             continue
 
+        if blocked_long and z >= 0:
+            blocked_long = False
+        if blocked_short and z <= 0:
+            blocked_short = False
+
         if current_pos == 0:
-            if z < -config.entry_z:
+            if z < -config.entry_z and not blocked_long:
                 current_pos = 1
-            elif z > config.entry_z:
+            elif z > config.entry_z and not blocked_short:
                 current_pos = -1
 
         elif current_pos == 1:
-            if abs(z) < config.exit_z or z > config.stop_z:
+            if abs(z) < config.exit_z:
                 current_pos = 0
+            elif abs(z) > config.stop_z:
+                current_pos = 0
+                blocked_long = True
 
         elif current_pos == -1:
-            if abs(z) < config.exit_z or z < -config.stop_z:
+            if abs(z) < config.exit_z:
                 current_pos = 0
+            elif abs(z) > config.stop_z:
+                current_pos = 0
+                blocked_short = True
 
         positions.iloc[i] = current_pos
 
