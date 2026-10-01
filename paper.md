@@ -51,6 +51,12 @@ The lower bound (1 day) rules out spreads that mean-revert faster than transacti
 
 Of 120 candidate pairs in the 16-asset universe, **10 pass the screen** on 2023-01-01 → 2024-12-31 training data.
 
+**Annual re-screen (expanding window).** The pair universe is not static: new cointegrated relationships can form after the original training window closes. Once a year, the same four-filter screen re-runs on an expanding window — `TRAIN_START` (2023-01-01) through the end of the most recently completed calendar year — and any pair that newly qualifies is added to the trading set.
+
+To keep this honest, a newly-qualifying pair is **never** backtested on data the expanded screen used to find it. Its OOS window starts the day *after* the expanded screen's end date, so pair selection and performance scoring remain fully separated, exactly as in the original design. New pairs are reported in their own summary table — they accumulate too little OOS history in year one to be compared on equal footing with the original 10 pairs' multi-year track record, and mixing them in would understate the original pairs' significance.
+
+The original TRAIN (2023-2024) / TEST (2025-present) split and its 10 pairs are completely unaffected by this process — their training window never grows and their OOS series is never re-cut, so that comparison stays apples-to-apples from one run to the next. The re-screen is strictly additive.
+
 ---
 
 ## 3. Position Sizing — Walk-Forward Fractional Kelly

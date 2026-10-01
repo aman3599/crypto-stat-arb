@@ -15,6 +15,10 @@ Pipeline:
     5. Walk-forward Kelly sizing (quarterly rebalance; weights computed from past data)
     6. Backtest with 20bps transaction costs and drawdown kill-switch
     7. Report performance + alpha t-stat vs BTC benchmark
+    8. Annual re-screen: re-run cointegration on an expanding window (TRAIN_START
+       through the most recently completed calendar year) to catch newly-formed
+       cointegrated pairs. Each new pair gets its own OOS window starting the day
+       after the expanded screen ends, so it's never scored on data the screen saw.
 
 Key methodology notes:
   - Pair selection (cointegration tests, hedge ratios, half-life) is estimated on TRAIN only.
@@ -22,6 +26,10 @@ Key methodology notes:
   - Kelly weights are walk-forward (no in-sample weight optimisation bias).
   - Transaction cost: 20bps total per trade (10bps per leg) — crypto market standard.
   - Alpha t-stat: intercept t-statistic from regressing strategy returns on BTC returns.
+  - The original TRAIN/TEST split and its pairs are never touched by the annual
+    re-screen — that OOS track record stays comparable run over run. The re-screen
+    only ever *adds* newly-qualifying pairs, each with a fresh, non-overlapping
+    OOS window; it never extends or re-fits the original pairs' training window.
 """
 
 import argparse
@@ -47,6 +55,17 @@ TRAIN_START = "2023-01-01"
 TRAIN_END   = "2024-12-31"  # ~2 years of training data
 TEST_START  = "2025-01-01"
 TEST_END    = None           # through present (~15 months as of Apr 2026)
+
+# ── Annual re-screen (expanding window) ─────────────────────────────────────
+# Once a year, re-screen for cointegration on TRAIN_START -> end of the most
+# recently completed calendar year. This is strictly wider than TRAIN_START/
+# TRAIN_END and only ever grows, once per year. Pairs that qualify here but
+# didn't in the original screen are "new pairs" — they get backtested on their
+# own OOS window starting the day after RESCREEN_END, so the re-screen never
+# sees the data it's later scored on.
+_last_complete_year_end = pd.Timestamp(year=pd.Timestamp.now(tz="UTC").year - 1, month=12, day=31, tz="UTC")
+RESCREEN_END = max(_last_complete_year_end, pd.Timestamp(TRAIN_END, tz="UTC"))
+RESCREEN_TEST_START = RESCREEN_END + pd.Timedelta(days=1)
 
 
 def run_pipeline(refresh: bool = False, plot: bool = False, live: bool = False):
@@ -114,61 +133,116 @@ def run_pipeline(refresh: bool = False, plot: bool = False, live: bool = False):
     all_results_test  = []
 
     for pair_res in valid_pairs:
-        a, b = pair_res.asset_a, pair_res.asset_b
-        print(f"\n[3-6] Processing pair: {a} / {b}  (hedge ratio: {pair_res.hedge_ratio:.4f})")
-
-        hedge_ratio = pair_res.hedge_ratio
-
-        spread_train = compute_spread(prices_train[a], prices_train[b], hedge_ratio)
-        sig_train = generate_signals(spread_train, signal_cfg)
-        sizing_train = kelly_size(sig_train, prices_train[a], prices_train[b], hedge_ratio, sizing_cfg)
-        result_train = run_backtest(
-            prices_train[a], prices_train[b],
-            sig_train, sizing_train,
-            hedge_ratio, a, b, bt_cfg,
-            benchmark_prices=btc_benchmark,
+        result_fit, result_oos, sig_fit, sig_oos = _backtest_pair(
+            pair_res, prices_train, prices_test,
+            signal_cfg, sizing_cfg, bt_cfg, btc_benchmark,
+            fit_label="TRAIN — in-sample reference",
+            oos_label="TEST — out-of-sample, walk-forward",
+            step_label="[3-6]", live=live,
         )
-        print_results(result_train, label="TRAIN — in-sample reference")
-        all_results_train.append(result_train)
-
-        if prices_test.empty:
-            print("      (No test data available, skipping out-of-sample backtest.)")
-            continue
-
-        spread_test = compute_spread(prices_test[a], prices_test[b], hedge_ratio)
-        sig_test = generate_signals(spread_test, signal_cfg)
-
-        print(f"      Test signals — long: {(sig_test.position==1).sum()}bars  "
-              f"short: {(sig_test.position==-1).sum()}bars  "
-              f"flat: {(sig_test.position==0).sum()}bars")
-
-        if live:
-            sig = get_current_signal(sig_test, a, b, hedge_ratio)
-            pos_label = {1: "LONG SPREAD", -1: "SHORT SPREAD", 0: "FLAT"}[sig.position]
-            print(f"\n  ── LIVE SIGNAL: {a}/{b} ──")
-            print(f"     Date:     {sig.date}")
-            print(f"     Z-score:  {sig.zscore:+.3f}")
-            print(f"     Position: {pos_label}")
-            print(f"     Hedge ratio: {sig.hedge_ratio}")
-            continue
-
-        result_test = run_backtest_walkforward(
-            prices_test[a], prices_test[b],
-            sig_test,
-            hedge_ratio, a, b, bt_cfg,
-            sizing_cfg=sizing_cfg,
-            rebalance_freq="QS",
-            benchmark_prices=btc_benchmark,
-        )
-        print_results(result_test, label="TEST — out-of-sample, walk-forward")
-        all_results_test.append(result_test)
-
-        if plot:
-            _plot_pair(result_train, result_test, sig_train, sig_test, signal_cfg, a, b)
+        all_results_train.append(result_fit)
+        if result_oos is not None:
+            all_results_test.append(result_oos)
+            if plot:
+                _plot_pair(result_fit, result_oos, sig_fit, sig_oos, signal_cfg, pair_res.asset_a, pair_res.asset_b)
 
     # ── Summary table ─────────────────────────────────────────────
     if all_results_test and not live:
         _print_summary(all_results_train, all_results_test, valid_pairs)
+
+    # ── 8. Annual re-screen: catch newly-cointegrated pairs ────────
+    original_pair_keys = {(r.asset_a, r.asset_b) for r in valid_pairs}
+    prices_rescreen = prices_full[prices_full.index <= RESCREEN_END]
+    prices_new_oos  = prices_full[prices_full.index >= RESCREEN_TEST_START]
+
+    print(f"\n[8/8] Annual re-screen on expanding window "
+          f"({TRAIN_START} → {RESCREEN_END.date()})...")
+    rescreen_results = screen_pairs(
+        prices_rescreen,
+        eg_pvalue_threshold=0.20,
+        min_halflife_days=1.0,
+        max_halflife_days=120.0,
+        adf_pvalue_threshold=0.15,
+        require_johansen=False,
+        bar_hours=BAR_HOURS,
+    )
+    new_pairs = [r for r in rescreen_results if r.is_valid and (r.asset_a, r.asset_b) not in original_pair_keys]
+
+    if not new_pairs:
+        print("      No newly-cointegrated pairs beyond the original TRAIN screen.")
+    else:
+        print(f"      {len(new_pairs)} new pair(s) found — OOS window: "
+              f"{RESCREEN_TEST_START.date()} → present (never seen by this screen).")
+        new_results_fit, new_results_oos = [], []
+        for pair_res in new_pairs:
+            result_fit, result_oos, sig_fit, sig_oos = _backtest_pair(
+                pair_res, prices_rescreen, prices_new_oos,
+                signal_cfg, sizing_cfg, bt_cfg, btc_benchmark,
+                fit_label=f"RE-SCREEN FIT ({TRAIN_START}→{RESCREEN_END.date()})",
+                oos_label=f"NEW PAIR — OOS from {RESCREEN_TEST_START.date()}",
+                step_label="[8/8]", live=live,
+            )
+            new_results_fit.append(result_fit)
+            if result_oos is not None:
+                new_results_oos.append(result_oos)
+                if plot:
+                    _plot_pair(result_fit, result_oos, sig_fit, sig_oos, signal_cfg, pair_res.asset_a, pair_res.asset_b)
+
+        if new_results_oos and not live:
+            print("\n(New pairs are tracked separately — too little OOS history yet to "
+                  "compare against the original pairs' multi-year track record.)")
+            _print_summary(new_results_fit, new_results_oos, new_pairs)
+
+
+def _backtest_pair(pair_res, prices_fit, prices_oos, signal_cfg, sizing_cfg, bt_cfg,
+                    btc_benchmark, fit_label, oos_label, step_label="", live=False):
+    """Fit on prices_fit (in-sample reference), then walk-forward backtest on prices_oos."""
+    a, b = pair_res.asset_a, pair_res.asset_b
+    hedge_ratio = pair_res.hedge_ratio
+    print(f"\n{step_label} Processing pair: {a} / {b}  (hedge ratio: {hedge_ratio:.4f})")
+
+    spread_fit = compute_spread(prices_fit[a], prices_fit[b], hedge_ratio)
+    sig_fit = generate_signals(spread_fit, signal_cfg)
+    sizing_fit = kelly_size(sig_fit, prices_fit[a], prices_fit[b], hedge_ratio, sizing_cfg)
+    result_fit = run_backtest(
+        prices_fit[a], prices_fit[b],
+        sig_fit, sizing_fit,
+        hedge_ratio, a, b, bt_cfg,
+        benchmark_prices=btc_benchmark,
+    )
+    print_results(result_fit, label=fit_label)
+
+    if prices_oos.empty:
+        print("      (No OOS data available yet, skipping out-of-sample backtest.)")
+        return result_fit, None, sig_fit, None
+
+    spread_oos = compute_spread(prices_oos[a], prices_oos[b], hedge_ratio)
+    sig_oos = generate_signals(spread_oos, signal_cfg)
+
+    print(f"      OOS signals — long: {(sig_oos.position==1).sum()}bars  "
+          f"short: {(sig_oos.position==-1).sum()}bars  "
+          f"flat: {(sig_oos.position==0).sum()}bars")
+
+    if live:
+        sig = get_current_signal(sig_oos, a, b, hedge_ratio)
+        pos_label = {1: "LONG SPREAD", -1: "SHORT SPREAD", 0: "FLAT"}[sig.position]
+        print(f"\n  ── LIVE SIGNAL: {a}/{b} ──")
+        print(f"     Date:     {sig.date}")
+        print(f"     Z-score:  {sig.zscore:+.3f}")
+        print(f"     Position: {pos_label}")
+        print(f"     Hedge ratio: {sig.hedge_ratio}")
+        return result_fit, None, sig_fit, sig_oos
+
+    result_oos = run_backtest_walkforward(
+        prices_oos[a], prices_oos[b],
+        sig_oos,
+        hedge_ratio, a, b, bt_cfg,
+        sizing_cfg=sizing_cfg,
+        rebalance_freq="QS",
+        benchmark_prices=btc_benchmark,
+    )
+    print_results(result_oos, label=oos_label)
+    return result_fit, result_oos, sig_fit, sig_oos
 
 
 def _plot_pair(result_train, result_test, sig_train, sig_test, signal_cfg, a, b):

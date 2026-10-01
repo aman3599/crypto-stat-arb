@@ -26,6 +26,8 @@ After a stop fires, re-entry in the same direction is suppressed until z crosses
 
 **Pair screening** (training window only): Engle-Granger cointegration (p < 0.20) + ADF on residuals (p < 0.15) + Ornstein-Uhlenbeck half-life in [1, 120] days. Of 120 candidate pairs in the 16-asset universe, **10 pass**.
 
+**Annual re-screen**: once a year, the same screen re-runs on an expanding window (`TRAIN_START` → end of the most recently completed calendar year) to catch pairs that have become cointegrated since the original 2023–2024 train window. Any newly-qualifying pair is backtested on its own OOS window starting the day *after* the expanded screen ends — never on data the re-screen itself used — so it gets an honest, non-overlapping track record. New pairs are reported in a separate table and never merged into the original 10 pairs' multi-year OOS history. The original TRAIN/TEST split and its pairs are untouched by this — that comparison stays apples-to-apples run over run.
+
 **Sizing**: fractional Kelly at 25% of optimum, recomputed quarterly on past data only (walk-forward), clipped at 20% of capital per pair, applied dollar-neutrally across the two legs.
 
 ---
